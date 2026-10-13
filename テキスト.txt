@@ -1,0 +1,1289 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Nexus Chat - ネクサスチャット</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        nexus: {
+                            primary: '#6366f1',
+                            dark: '#4f46e5',
+                            bubbleMy: '#e0e7ff',
+                            bubbleOther: '#ffffff',
+                            bgChat: '#0f172a'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- FontAwesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- PeerJS -->
+    <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+    <!-- JSZip -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <style>
+        button, label, input, a {
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: transparent;
+        }
+        @keyframes blink {
+            0% { opacity: 1; }
+            50% { opacity: 0.3; }
+            100% { opacity: 1; }
+        }
+        .animate-blink {
+            animation: blink 1.5s infinite;
+        }
+    </style>
+</head>
+<body class="bg-slate-900 h-screen flex flex-col font-sans text-slate-100 select-none">
+
+    <!-- Top Power Warning Banner -->
+    <div class="bg-red-950 border-b border-red-800 text-red-200 text-center py-1.5 text-xs font-bold tracking-wider animate-blink z-30 flex items-center justify-center space-x-2">
+        <i class="fa-solid fa-triangle-exclamation"></i>
+        <span>電源を切れば通信は切断されます</span>
+    </div>
+
+    <!-- App Container -->
+    <div id="app" class="flex-1 flex flex-col md:flex-row max-w-6xl w-full mx-auto shadow-2xl bg-slate-800 overflow-hidden md:my-2 md:rounded-2xl border border-slate-700">
+
+        <!-- Sidebar / Room & Chat Selector -->
+        <div id="sidebar" class="w-full md:w-80 bg-slate-900 border-r border-slate-700 flex flex-col z-20">
+            <!-- App Header & User Profile -->
+            <div class="p-4 bg-slate-900 border-b border-slate-700 flex items-center justify-between">
+                <div class="flex items-center space-x-3">
+                    <div id="user-avatar-container" class="w-12 h-12 bg-indigo-600 rounded-full flex items-center text-white justify-center font-bold text-lg shadow overflow-hidden border border-indigo-400">
+                        <span id="user-avatar-text">U</span>
+                    </div>
+                    <div>
+                        <h1 class="font-extrabold text-white text-base tracking-wide flex items-center space-x-1">
+                            <span>Nexus Chat</span>
+                            <span class="text-[10px] bg-indigo-500 text-white px-1.5 py-0.5 rounded">Pro</span>
+                        </h1>
+                        <p id="display-name" class="text-xs text-slate-400 truncate max-w-[120px]">ゲストユーザー</p>
+                    </div>
+                </div>
+                <button onclick="openSettings()" class="text-slate-400 hover:text-white p-3 transition"><i class="fa-solid fa-sliders text-lg"></i></button>
+            </div>
+
+            <!-- Mode Selector -->
+            <div class="p-3 bg-slate-800 border-b border-slate-700 flex space-x-2">
+                <button onclick="switchMode('private')" id="btn-mode-private" class="flex-1 py-2.5 text-xs font-bold rounded-xl bg-indigo-600 text-white shadow transition">ダイレクト(1:1)</button>
+                <button onclick="switchMode('group')" id="btn-mode-group" class="flex-1 py-2.5 text-xs font-bold rounded-xl bg-slate-700 text-slate-300 transition">スクール空間</button>
+            </div>
+
+            <!-- Connection & Room Panel -->
+            <div class="p-4 flex-1 overflow-y-auto space-y-4">
+                <!-- Private Chat Panel -->
+                <div id="panel-private" class="space-y-3">
+                    <h3 class="text-xs font-semibold text-indigo-400 uppercase tracking-wider">ダイレクトトーク</h3>
+                    <p class="text-xs text-slate-400">4桁のシークレットコードで完全安全な1対1のP2P通信を確立します。</p>
+                    <div class="flex space-x-2">
+                        <input type="text" id="private-room-input" maxlength="4" placeholder="4桁コード" class="flex-1 bg-slate-800 border border-slate-600 rounded-xl px-3 py-3 text-sm text-center tracking-widest font-bold text-white focus:outline-none focus:border-indigo-500" oninput="this.value = this.value.replace(/[^0-9]/g, '')">
+                        <button onclick="joinPrivateRoom()" class="bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-3 rounded-xl text-sm font-semibold transition shadow">接続</button>
+                    </div>
+                </div>
+
+                <!-- Group Chat Panel -->
+                <div id="panel-group" class="space-y-3 hidden">
+                    <h3 class="text-xs font-semibold text-indigo-400 uppercase tracking-wider">スクール空間 (グループ最大40人)</h3>
+                    <p class="text-xs text-slate-400">自由な4桁コードを入力して作成または入室できます（最大40人全員の会話がリアルタイム同期）。</p>
+                    <div class="flex space-x-2">
+                        <input type="text" id="group-room-input" maxlength="4" placeholder="4桁コード" class="flex-1 bg-slate-800 border border-slate-600 rounded-xl px-3 py-3 text-sm text-center tracking-widest font-bold text-white focus:outline-none focus:border-indigo-500" oninput="this.value = this.value.replace(/[^0-9]/g, '')">
+                        <button onclick="joinGroupRoom()" class="bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-3 rounded-xl text-sm font-semibold transition shadow">入室/作成</button>
+                    </div>
+                    <button onclick="createGroupRoom()" class="w-full bg-slate-700 hover:bg-slate-600 text-slate-200 font-bold py-2.5 px-4 rounded-xl shadow transition flex items-center justify-center space-x-2 text-xs">
+                        <i class="fa-solid fa-dice"></i><span>ランダムな4桁を自動発行</span>
+                    </button>
+                </div>
+
+                <!-- Chat History / Rooms Record Section -->
+                <div class="border-t border-slate-700 pt-3 space-y-2">
+                    <div class="flex justify-between items-center">
+                        <h3 class="text-xs font-semibold text-indigo-400 uppercase tracking-wider">チャット履歴 (再接続)</h3>
+                        <button onclick="clearHistory()" class="text-[10px] text-slate-500 hover:text-slate-300">履歴クリア</button>
+                    </div>
+                    <div id="history-list" class="space-y-1.5 max-h-40 overflow-y-auto">
+                        <p class="text-xs text-slate-500 text-center py-2">記録されたルームはありません</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Connection Status Footer -->
+            <div class="p-3 bg-slate-900 border-t border-slate-700 text-xs text-slate-400 flex justify-between items-center">
+                <span id="connection-status" class="flex items-center space-x-1.5"><span class="w-2.5 h-2.5 rounded-full bg-amber-500"></span><span>未接続</span></span>
+                <span id="peer-count">接続ピア: 0</span>
+            </div>
+        </div>
+
+        <!-- Main Chat Area -->
+        <div id="chat-area" class="flex-1 flex flex-col bg-slate-950 relative">
+            <!-- Chat Header -->
+            <div class="bg-slate-900 border-b border-slate-700 px-4 py-3 flex items-center justify-between shadow-sm z-10">
+                <div class="flex items-center space-x-3">
+                    <button onclick="toggleSidebar()" class="md:hidden text-slate-300 p-2 mr-1"><i class="fa-solid fa-bars text-xl"></i></button>
+                    <div class="w-10 h-10 bg-indigo-900 border border-indigo-500 rounded-xl flex items-center justify-center text-indigo-300 font-bold" id="chat-room-avatar">
+                        <i class="fa-solid fa-shield-halved"></i>
+                    </div>
+                    <div>
+                        <h2 id="chat-room-title" class="font-bold text-white text-sm">Nexusへようこそ</h2>
+                        <p id="chat-room-subtitle" class="text-xs text-slate-400">コードを入力してセッションを開始してください</p>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-2">
+                    <!-- Audio Call Button -->
+                    <button onclick="toggleAudioCall()" id="btn-audio-call" class="bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-slate-600 px-3 py-2 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 shadow" title="音声通話を開始">
+                        <i class="fa-solid fa-phone"></i><span class="hidden sm:inline">音声通話</span>
+                    </button>
+                    <!-- Video Call Trigger Button -->
+                    <button onclick="toggleVideoCall()" id="btn-video-call" class="bg-slate-800 hover:bg-slate-700 text-indigo-300 border border-slate-600 px-3 py-2 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 shadow" title="テレビ通話を開始">
+                        <i class="fa-solid fa-video"></i><span class="hidden sm:inline">テレビ通話</span>
+                    </button>
+                    <button onclick="showRoomInfo()" class="text-slate-400 hover:text-white p-2 transition"><i class="fa-solid fa-circle-info text-xl"></i></button>
+                </div>
+            </div>
+
+            <!-- Video Call Overlay / Container -->
+            <div id="video-container" class="bg-black border-b border-slate-800 p-2 hidden flex flex-col gap-2 relative z-10">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div class="relative bg-slate-900 rounded-xl overflow-hidden aspect-video border border-slate-700 flex items-center justify-center">
+                        <video id="local-video" autoplay playsinline muted class="w-full h-full object-cover transform -scale-x-100"></video>
+                        <span id="local-video-label" class="absolute bottom-2 left-2 bg-black bg-opacity-60 text-white text-[10px] px-2 py-0.5 rounded-md">あなた (内側カメラ)</span>
+                    </div>
+                    <div class="relative bg-slate-900 rounded-xl overflow-hidden aspect-video border border-slate-700 flex items-center justify-center">
+                        <video id="remote-video" autoplay playsinline class="w-full h-full object-cover"></video>
+                        <span id="remote-video-label" class="absolute bottom-2 left-2 bg-black bg-opacity-60 text-white text-[10px] px-2 py-0.5 rounded-md">相手の映像 (待機中...)</span>
+                    </div>
+                </div>
+                <!-- Video Control Buttons Toolbar -->
+                <div class="flex items-center justify-center space-x-2 py-1 flex-wrap gap-y-2">
+                    <button onclick="toggleMute()" id="btn-mute" class="bg-slate-800 hover:bg-slate-700 text-white px-3 py-2 rounded-xl text-xs font-bold border border-slate-600 transition flex items-center space-x-1.5 shadow">
+                        <i class="fa-solid fa-microphone"></i><span>ミュート</span>
+                    </button>
+                    <button onclick="toggleCamera()" id="btn-cam" class="bg-slate-800 hover:bg-slate-700 text-white px-3 py-2 rounded-xl text-xs font-bold border border-slate-600 transition flex items-center space-x-1.5 shadow">
+                        <i class="fa-solid fa-video-slash"></i><span>カメラOFF</span>
+                    </button>
+                    <button onclick="switchCamera()" id="btn-switch-cam" class="bg-slate-800 hover:bg-slate-700 text-white px-3 py-2 rounded-xl text-xs font-bold border border-slate-600 transition flex items-center space-x-1.5 shadow">
+                        <i class="fa-solid fa-camera-rotate"></i><span>外側カメラ</span>
+                    </button>
+                    <button onclick="toggleScreenShare()" id="btn-screen" class="bg-slate-800 hover:bg-slate-700 text-white px-3 py-2 rounded-xl text-xs font-bold border border-slate-600 transition flex items-center space-x-1.5 shadow">
+                        <i class="fa-solid fa-desktop"></i><span>画面共有</span>
+                    </button>
+                    <button onclick="stopAllCalls()" class="bg-red-600 hover:bg-red-500 text-white px-3 py-2 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 shadow">
+                        <i class="fa-solid fa-xmark"></i><span>通話終了</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Messages Container -->
+            <div id="messages-container" class="flex-1 p-4 overflow-y-auto space-y-4">
+                <div class="text-center my-6">
+                    <div class="inline-block bg-indigo-950 border border-indigo-800 text-indigo-300 text-xs px-4 py-2.5 rounded-xl shadow">
+                        ⚡ 350MB大容量ファイル対応・一括ZIP圧縮・音声通話・画面共有システム
+                    </div>
+                </div>
+            </div>
+
+            <!-- Custom Original Sticker Panel -->
+            <div id="sticker-panel" class="bg-slate-900 border-t border-slate-700 p-3 hidden grid grid-cols-2 sm:grid-cols-4 gap-2 shadow-2xl z-20">
+                <button onclick="sendSticker('what?')" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 p-3 rounded-xl text-xs font-bold text-indigo-300 shadow transition">what?</button>
+                <button onclick="sendSticker('OK thanks')" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 p-3 rounded-xl text-xs font-bold text-indigo-300 shadow transition">OK thanks</button>
+                <button onclick="sendSticker('(￣O￣;)')" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 p-3 rounded-xl text-xs font-bold text-indigo-300 shadow transition">(￣O￣;)</button>
+                <button onclick="sendSticker('?')" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 p-3 rounded-xl text-xs font-bold text-indigo-300 shadow transition">?</button>
+                <button onclick="sendSticker('NO')" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 p-3 rounded-xl text-xs font-bold text-indigo-300 shadow transition">NO</button>
+                <button onclick="sendSticker('OK')" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 p-3 rounded-xl text-xs font-bold text-indigo-300 shadow transition">OK</button>
+                <button onclick="sendSticker('what are you doing?')" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 p-3 rounded-xl text-xs font-bold text-indigo-300 shadow transition">wht are you doing?</button>
+                <button onclick="sendSticker('See you')" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 p-3 rounded-xl text-xs font-bold text-indigo-300 shadow transition">See you</button>
+                <button onclick="sendSticker('thank you')" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 p-3 rounded-xl text-xs font-bold text-indigo-300 shadow transition">thank you</button>
+                <button onclick="sendSticker('see you again')" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 p-3 rounded-xl text-xs font-bold text-indigo-300 shadow transition">see you again</button>
+                <button onclick="sendSticker('( ・∇・)ﾉ ﾔｱ')" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 p-3 rounded-xl text-xs font-bold text-indigo-300 shadow transition">( ・∇・)ﾉ ﾔｱ</button>
+                <button onclick="sendSticker('HELLO')" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 p-3 rounded-xl text-xs font-bold text-indigo-300 shadow transition">HELLO</button>
+                <button onclick="sendSticker('^ - ^')" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 p-3 rounded-xl text-xs font-bold text-indigo-300 shadow transition">^ - ^</button>
+                <button onclick="sendSticker('(๑╹ω╹๑ )')" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 p-3 rounded-xl text-xs font-bold text-indigo-300 shadow transition">(๑╹ω╹๑ )</button>
+                <button onclick="sendSticker('Σ('◉⌓◉’)')" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 p-3 rounded-xl text-xs font-bold text-indigo-300 shadow transition">Σ('◉⌓◉’)</button>
+                <button onclick="sendSticker('( ´∀｀)')" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 p-3 rounded-xl text-xs font-bold text-indigo-300 shadow transition">( ´∀｀)</button>
+                <button onclick="sendSticker('d(^_^o)')" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 p-3 rounded-xl text-xs font-bold text-indigo-300 shadow transition">d(^_^o)</button>
+                <button onclick="sendSticker('(￣^￣)')" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 p-3 rounded-xl text-xs font-bold text-indigo-300 shadow transition">(￣^￣)</button>
+                <button onclick="sendSticker('(T ^ T)')" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 p-3 rounded-xl text-xs font-bold text-indigo-300 shadow transition">(T ^ T)</button>
+                <button onclick="sendSticker('( ´ ▽ ` )')" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 p-3 rounded-xl text-xs font-bold text-indigo-300 shadow transition">( ´ ▽ ` )</button>
+            </div>
+
+            <!-- Input Bar -->
+            <div class="bg-slate-900 border-t border-slate-700 p-3 flex items-center space-x-2 z-10">
+                <button onclick="toggleStickerPanel()" class="text-slate-400 hover:text-white p-3 transition" title="オリジナルスタンプ">
+                    <i class="fa-solid fa-icons text-xl"></i>
+                </button>
+                <label class="cursor-pointer text-slate-400 hover:text-white p-3 transition" title="画像・動画送信（350MBまで複数可）">
+                    <i class="fa-solid fa-photo-film text-xl"></i>
+                    <input type="file" id="media-input" accept="image/*,video/*" multiple class="hidden" onchange="sendMediaFiles(event)">
+                </label>
+                <div class="flex-1 relative">
+                    <input type="text" id="message-input" placeholder="メッセージを入力..." onkeypress="handleKeyPress(event)" class="w-full bg-slate-800 border border-slate-600 text-white rounded-full px-4 py-3 text-sm focus:outline-none focus:border-indigo-500">
+                </div>
+                <!-- zipをダウンロードボタンを入力欄の右側に追加 -->
+                <button onclick="downloadAllZips()" class="bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-600 px-3 py-2 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 shadow flex-shrink-0" title="すべてのZIPをダウンロード">
+                    <i class="fa-solid fa-file-zipper"></i><span class="hidden sm:inline">zipをダウンロード</span>
+                </button>
+                <button onclick="sendMessage()" class="bg-indigo-600 hover:bg-indigo-500 text-white w-11 h-11 rounded-full flex items-center justify-center transition shadow flex-shrink-0">
+                    <i class="fa-solid fa-paper-plane"></i>
+                </button>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="fixed inset-0 bg-black bg-opacity-70 hidden flex items-center justify-center z-50 p-4">
+        <div class="bg-slate-900 border border-slate-700 rounded-2xl p-6 w-80 shadow-2xl space-y-4">
+            <h3 class="font-bold text-lg text-white">プロフィール設定</h3>
+            <div>
+                <label class="block text-xs font-semibold text-slate-400 mb-1">表示名</label>
+                <input type="text" id="settings-name-input" class="w-full bg-slate-800 border border-slate-600 text-white rounded-xl px-3 py-3 text-sm focus:outline-none focus:border-indigo-500">
+            </div>
+            <div>
+                <label class="block text-xs font-semibold text-slate-400 mb-1">アバター画像（任意）</label>
+                <input type="file" id="settings-avatar-input" accept="image/*" class="w-full text-xs text-slate-400 file:mr-4 file:py-2.5 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-indigo-600 file:text-white hover:file:bg-indigo-500">
+            </div>
+            <div class="flex justify-end space-x-2 pt-2">
+                <button onclick="closeSettings()" class="px-4 py-2.5 text-sm text-slate-400 hover:bg-slate-800 rounded-xl transition">キャンセル</button>
+                <button onclick="saveSettings()" class="px-4 py-2.5 text-sm bg-indigo-600 text-white rounded-xl hover:bg-indigo-500 font-semibold transition shadow">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Script Application Logic -->
+    <script>
+        let myName = localStorage.getItem('nexus_my_name') || ('ユーザー_' + Math.floor(Math.random() * 1000));
+        let myAvatar = localStorage.getItem('nexus_my_avatar') || null;
+
+        let currentMode = 'private';
+        let currentRoomId = null;
+        let currentModeName = '';
+        
+        let peer = null;
+        let connections = {}; 
+        let incomingBuffers = {}; 
+        let activePeerIds = new Set(); // 40人全員の会話同期用ピア管理
+
+        // Video Call & Audio/Screen Variables
+        let localStream = null;
+        let activeCall = null;
+        let isVideoActive = false;
+        let isAudioOnlyActive = false;
+        let isScreenSharing = false;
+        let isMuted = false;
+        let isCamOff = false;
+        let useFacingMode = 'user'; // 'user' (内側) または 'environment' (外側)
+
+        // 蓄積されたZIPファイル保持用
+        let chatZipFiles = [];
+
+        const peerConfig = {
+            config: {
+                iceServers: [
+                    { urls: 'stun:stun.l.google.com:19302' },
+                    { urls: 'stun:stun1.l.google.com:19302' },
+                    { urls: 'stun:stun2.l.google.com:19302' }
+                ]
+            }
+        };
+
+        window.onload = () => {
+            updateMyAvatarDisplay();
+            document.getElementById('settings-name-input').value = myName;
+            renderHistoryList();
+        };
+
+        function updateMyAvatarDisplay() {
+            document.getElementById('display-name').innerText = myName;
+            const container = document.getElementById('user-avatar-container');
+            if (myAvatar) {
+                container.innerHTML = `<img src="${myAvatar}" class="w-full h-full object-cover">`;
+            } else {
+                container.innerHTML = `<span id="user-avatar-text">${myName.charAt(0)}</span>`;
+            }
+        }
+
+        function openSettings() {
+            document.getElementById('settings-name-input').value = myName;
+            document.getElementById('settings-modal').classList.remove('hidden');
+        }
+
+        function closeSettings() {
+            document.getElementById('settings-modal').classList.add('hidden');
+        }
+
+        function saveSettings() {
+            const nameInput = document.getElementById('settings-name-input').value.trim();
+            if (nameInput) {
+                myName = nameInput;
+                localStorage.setItem('nexus_my_name', myName);
+            }
+
+            const avatarFile = document.getElementById('settings-avatar-input').files[0];
+            if (avatarFile) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    myAvatar = e.target.result;
+                    localStorage.setItem('nexus_my_avatar', myAvatar);
+                    updateMyAvatarDisplay();
+                    closeSettings();
+                };
+                reader.readAsDataURL(avatarFile);
+            } else {
+                updateMyAvatarDisplay();
+                closeSettings();
+            }
+        }
+
+        function toggleSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            if (sidebar.style.display === 'flex' && window.innerWidth < 768) {
+                sidebar.style.display = 'none';
+            } else {
+                sidebar.style.display = 'flex';
+                sidebar.classList.remove('hidden');
+            }
+        }
+
+        window.addEventListener('resize', () => {
+            const sidebar = document.getElementById('sidebar');
+            if (window.innerWidth >= 768) {
+                sidebar.style.display = 'flex';
+                sidebar.classList.remove('hidden');
+            } else {
+                sidebar.style.display = 'none';
+                sidebar.classList.add('hidden');
+            }
+        });
+
+        function toggleStickerPanel() {
+            const panel = document.getElementById('sticker-panel');
+            panel.classList.toggle('hidden');
+        }
+
+        function switchMode(mode) {
+            currentMode = mode;
+            const btnPrivate = document.getElementById('btn-mode-private');
+            const btnGroup = document.getElementById('btn-mode-group');
+            const panelPrivate = document.getElementById('panel-private');
+            const panelGroup = document.getElementById('panel-group');
+
+            if (mode === 'private') {
+                btnPrivate.className = "flex-1 py-2.5 text-xs font-bold rounded-xl bg-indigo-600 text-white shadow transition";
+                btnGroup.className = "flex-1 py-2.5 text-xs font-bold rounded-xl bg-slate-700 text-slate-300 transition";
+                panelPrivate.classList.remove('hidden');
+                panelGroup.classList.add('hidden');
+            } else {
+                btnGroup.className = "flex-1 py-2.5 text-xs font-bold rounded-xl bg-indigo-600 text-white shadow transition";
+                btnPrivate.className = "flex-1 py-2.5 text-xs font-bold rounded-xl bg-slate-700 text-slate-300 transition";
+                panelGroup.classList.remove('hidden');
+                panelPrivate.classList.add('hidden');
+            }
+        }
+
+        function joinPrivateRoom() {
+            const roomId = document.getElementById('private-room-input').value.trim();
+            if (roomId.length !== 4 || isNaN(roomId)) {
+                alert('4桁の数字コードを入力してください。');
+                return;
+            }
+            initRoom('ダイレクト', roomId, 'private');
+        }
+
+        function createGroupRoom() {
+            const random4Digits = Math.floor(1000 + Math.random() * 9000).toString();
+            document.getElementById('group-room-input').value = random4Digits;
+            initRoom('スクール空間', random4Digits, 'group');
+        }
+
+        function joinGroupRoom() {
+            const roomId = document.getElementById('group-room-input').value.trim();
+            if (roomId.length !== 4 || isNaN(roomId)) {
+                alert('4桁の数字コードを入力してください。');
+                return;
+            }
+            initRoom('スクール空間', roomId, 'group');
+        }
+
+        function saveRoomToHistory(modeName, roomId) {
+            let history = JSON.parse(localStorage.getItem('nexus_room_history') || '[]');
+            history = history.filter(item => item.roomId !== roomId);
+            history.unshift({ modeName, roomId, time: new Date().toLocaleDateString() });
+            if (history.length > 10) history.pop();
+            localStorage.setItem('nexus_room_history', JSON.stringify(history));
+            renderHistoryList();
+        }
+
+        function renderHistoryList() {
+            const container = document.getElementById('history-list');
+            const history = JSON.parse(localStorage.getItem('nexus_room_history') || '[]');
+            if (history.length === 0) {
+                container.innerHTML = '<p class="text-xs text-slate-500 text-center py-2">記録されたルームはありません</p>';
+                return;
+            }
+            container.innerHTML = '';
+            history.forEach(item => {
+                const div = document.createElement('div');
+                div.className = 'flex items-center justify-between bg-slate-800 hover:bg-slate-750 p-2.5 rounded-xl border border-slate-700 text-xs transition';
+                div.innerHTML = `
+                    <div>
+                        <span class="font-bold text-white">${item.modeName}</span>
+                        <span class="text-indigo-400 ml-1.5 tracking-wider">[${item.roomId}]</span>
+                    </div>
+                    <button onclick="reconnectRoom('${item.modeName}', '${item.roomId}')" class="bg-indigo-600 hover:bg-indigo-500 text-white px-2.5 py-1 rounded-lg font-semibold transition">再接続</button>
+                `;
+                container.appendChild(div);
+            });
+        }
+
+        function clearHistory() {
+            localStorage.removeItem('nexus_room_history');
+            renderHistoryList();
+        }
+
+        function reconnectRoom(modeName, roomId) {
+            const modeType = (modeName === 'ダイレクト') ? 'private' : 'group';
+            if (modeType === 'private') {
+                switchMode('private');
+                document.getElementById('private-room-input').value = roomId;
+            } else {
+                switchMode('group');
+                document.getElementById('group-room-input').value = roomId;
+            }
+            initRoom(modeName, roomId, modeType);
+        }
+
+        function initRoom(modeName, roomId, modeType) {
+            if (peer) {
+                try {
+                    peer.destroy();
+                } catch (e) {
+                    console.error(e);
+                }
+                peer = null;
+            }
+            stopAllCalls();
+            connections = {};
+            incomingBuffers = {};
+            activePeerIds.clear();
+            chatZipFiles = [];
+            currentRoomId = roomId;
+            currentModeName = modeName;
+            currentMode = modeType;
+
+            saveRoomToHistory(modeName, roomId);
+
+            document.getElementById('chat-room-title').innerText = `${modeName} (コード: ${currentRoomId})`;
+            document.getElementById('chat-room-subtitle').innerText = '接続準備中...';
+            document.getElementById('connection-status').innerHTML = '<span class="w-2.5 h-2.5 rounded-full bg-blue-500 animate-pulse"></span><span>接続確立中</span>';
+
+            clearMessages();
+            appendSystemMessage(`ルーム [コード: ${currentRoomId}] (${modeName}) に接続を試みています...`);
+
+            const prefix = (modeType === 'private') ? 'nexus_private' : 'nexus_group';
+            const hostPeerId = `${prefix}_${roomId}_host`;
+            const uniqueId = Math.random().toString(36).substring(2, 6);
+            const myId = `${prefix}_${roomId}_user_${uniqueId}`;
+
+            peer = new Peer(hostPeerId, peerConfig);
+
+            peer.on('open', (id) => {
+                document.getElementById('chat-room-subtitle').innerText = (modeType === 'private') ? 'ダイレクト待受中' : 'スクール空間ホスト（最大40人対応）';
+                appendSystemMessage((modeType === 'private') ? 'ダイレクト回線を開設しました。相手の接続を待っています...' : 'スクール空間（最大40人対応）を開設しました。');
+                document.getElementById('connection-status').innerHTML = '<span class="w-2.5 h-2.5 rounded-full bg-amber-500"></span><span>待受中</span>';
+                
+                activePeerIds.add(id);
+
+                peer.on('connection', (conn) => {
+                    setupConnection(conn, modeType);
+                    broadcastPeerList();
+                });
+
+                peer.on('call', (call) => {
+                    handleIncomingCall(call);
+                });
+            });
+
+            peer.on('error', (err) => {
+                if (err.type === 'unavailable-id') {
+                    peer.destroy();
+                    
+                    peer = new Peer(myId, peerConfig);
+                    peer.on('open', (openedId) => {
+                        appendSystemMessage('スクール空間を発見しました。最大40人のネットワークに参加中...');
+                        activePeerIds.add(openedId);
+                        
+                        const conn = peer.connect(hostPeerId);
+                        setupConnection(conn, modeType);
+
+                        setTimeout(() => {
+                            if (conn && conn.open) {
+                                conn.send({ type: 'request_peer_list', from: openedId });
+                            }
+                        }, 800);
+
+                        setTimeout(() => {
+                            if (localStream) {
+                                startCall(hostPeerId);
+                            }
+                        }, 1000);
+                    });
+
+                    peer.on('connection', (conn) => {
+                        setupConnection(conn, modeType);
+                    });
+
+                    peer.on('call', (call) => {
+                        handleIncomingCall(call);
+                    });
+
+                    peer.on('error', (subErr) => {
+                        console.error(subErr);
+                        document.getElementById('connection-status').innerHTML = '<span class="w-2.5 h-2.5 rounded-full bg-red-500"></span><span>接続エラー (network)</span>';
+                        appendSystemMessage(`ネットワークエラー: ${subErr.type}`);
+                    });
+                } else {
+                    console.error(err);
+                    document.getElementById('connection-status').innerHTML = '<span class="w-2.5 h-2.5 rounded-full bg-red-500"></span><span>ネットワークエラー</span>';
+                    appendSystemMessage(`ネットワークエラー: ${err.type}`);
+                }
+            });
+        }
+
+        function setupConnection(conn, modeType) {
+            connections[conn.peer] = conn;
+            activePeerIds.add(conn.peer);
+
+            conn.on('open', () => {
+                document.getElementById('connection-status').innerHTML = '<span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span><span>接続済み</span>';
+                appendSystemMessage('新しいメンバーがスクール空間に参加しました');
+                updatePeerCount();
+
+                if ((isVideoActive || isAudioOnlyActive) && localStream) {
+                    startCall(conn.peer);
+                }
+                
+                conn.send({ type: 'read_receipt', reader: myName });
+            });
+
+            conn.on('close', () => {
+                delete connections[conn.peer];
+                activePeerIds.delete(conn.peer);
+                document.getElementById('connection-status').innerHTML = '<span class="w-2.5 h-2.5 rounded-full bg-amber-500"></span><span>メンバー退出</span>';
+                appendSystemMessage('メンバーが退出しました');
+                updatePeerCount();
+            });
+
+            conn.on('data', (packet) => {
+                handleDataPacket(conn.peer, packet, modeType);
+            });
+        }
+
+        function broadcastPeerList() {
+            const peerList = Array.from(activePeerIds);
+            if (peerList.length > 40) {
+                peerList.length = 40;
+            }
+            Object.keys(connections).forEach(peerId => {
+                const conn = connections[peerId];
+                if (conn && conn.open) {
+                    conn.send({ type: 'peer_list', peers: peerList });
+                }
+            });
+        }
+
+        function connectToPeers(peerList) {
+            peerList.forEach(id => {
+                if (id !== peer.id && !connections[id] && activePeerIds.size < 40) {
+                    const conn = peer.connect(id);
+                    setupConnection(conn, currentMode);
+                }
+            });
+        }
+
+        // --- Call & Screen Share Functions ---
+        async function toggleAudioCall() {
+            if (isAudioOnlyActive) {
+                stopAllCalls();
+                return;
+            }
+            if (isVideoActive) {
+                stopAllCalls();
+            }
+
+            try {
+                localStream = await navigator.mediaDevices.getUserMedia({
+                    video: false,
+                    audio: true
+                });
+
+                const videoContainer = document.getElementById('video-container');
+                videoContainer.classList.remove('hidden');
+
+                document.getElementById('local-video').parentElement.classList.add('hidden');
+                document.getElementById('remote-video-label').innerText = '音声通話相手 (接続中)';
+
+                const btnAudio = document.getElementById('btn-audio-call');
+                btnAudio.className = "bg-red-600 hover:bg-red-500 text-white border border-red-500 px-3 py-2 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 shadow";
+                btnAudio.innerHTML = '<i class="fa-solid fa-phone-slash"></i><span class="hidden sm:inline">通話終了</span>';
+
+                isAudioOnlyActive = true;
+                isMuted = false;
+                updateVideoControlsUI();
+                appendSystemMessage('音声通話を開始しました');
+
+                Object.keys(connections).forEach(peerId => {
+                    startCall(peerId);
+                });
+            } catch (err) {
+                console.error(err);
+                alert('マイクへのアクセスが許可されていないか、利用できません。');
+            }
+        }
+
+        async function toggleVideoCall() {
+            if (isVideoActive) {
+                stopAllCalls();
+                return;
+            }
+            if (isAudioOnlyActive) {
+                stopAllCalls();
+            }
+
+            try {
+                localStream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: useFacingMode },
+                    audio: true
+                });
+
+                document.getElementById('local-video').parentElement.classList.remove('hidden');
+                const localVideoEl = document.getElementById('local-video');
+                localVideoEl.srcObject = localStream;
+
+                const videoContainer = document.getElementById('video-container');
+                videoContainer.classList.remove('hidden');
+
+                const btnVideo = document.getElementById('btn-video-call');
+                btnVideo.className = "bg-red-600 hover:bg-red-500 text-white border border-red-500 px-3 py-2 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 shadow";
+                btnVideo.innerHTML = '<i class="fa-solid fa-video-slash"></i><span class="hidden sm:inline">通話終了</span>';
+                
+                isVideoActive = true;
+                isMuted = false;
+                isCamOff = false;
+                updateVideoControlsUI();
+                appendSystemMessage('テレビ通話を開始しました');
+
+                Object.keys(connections).forEach(peerId => {
+                    startCall(peerId);
+                });
+            } catch (err) {
+                console.error(err);
+                alert('カメラまたはマイクへのアクセスが許可されていないか、利用できません。');
+            }
+        }
+
+        async function toggleScreenShare() {
+            if (!isScreenSharing) {
+                try {
+                    const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+                    const screenTrack = screenStream.getVideoTracks()[0];
+
+                    screenTrack.onended = () => {
+                        stopScreenShare();
+                    };
+
+                    if (localStream) {
+                        const videoSender = activeCall && activeCall.peerConnection ? 
+                            activeCall.peerConnection.getSenders().find(s => s.track && s.track.kind === 'video') : null;
+                        if (videoSender) {
+                            videoSender.replaceTrack(screenTrack);
+                        }
+                    }
+
+                    const localVideoEl = document.getElementById('local-video');
+                    localVideoEl.srcObject = screenStream;
+                    document.getElementById('local-video').parentElement.classList.remove('hidden');
+                    document.getElementById('local-video-label').innerText = 'あなた (画面共有中)';
+
+                    isScreenSharing = true;
+                    const btnScreen = document.getElementById('btn-screen');
+                    btnScreen.className = "bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-2 rounded-xl text-xs font-bold border border-indigo-500 transition flex items-center space-x-1.5 shadow";
+                    btnScreen.innerHTML = '<i class="fa-solid fa-desktop"></i><span>共有停止</span>';
+                    appendSystemMessage('画面共有を開始しました');
+                } catch (err) {
+                    console.error(err);
+                    alert('画面共有の開始に失敗しました。');
+                }
+            } else {
+                stopScreenShare();
+            }
+        }
+
+        function stopScreenShare() {
+            isScreenSharing = false;
+            const btnScreen = document.getElementById('btn-screen');
+            btnScreen.className = "bg-slate-800 hover:bg-slate-700 text-white px-3 py-2 rounded-xl text-xs font-bold border border-slate-600 transition flex items-center space-x-1.5 shadow";
+            btnScreen.innerHTML = '<i class="fa-solid fa-desktop"></i><span>画面共有</span>';
+
+            if (isVideoActive && localStream) {
+                const localVideoEl = document.getElementById('local-video');
+                localVideoEl.srcObject = localStream;
+                document.getElementById('local-video-label').innerText = useFacingMode === 'user' ? 'あなた (内側カメラ)' : 'あなた (外側カメラ)';
+
+                if (activeCall && activeCall.peerConnection) {
+                    const videoSender = activeCall.peerConnection.getSenders().find(s => s.track && s.track.kind === 'video');
+                    if (videoSender && localStream.getVideoTracks().length > 0) {
+                        videoSender.replaceTrack(localStream.getVideoTracks()[0]);
+                    }
+                }
+            }
+            appendSystemMessage('画面共有を終了しました');
+        }
+
+        function toggleMute() {
+            if (!localStream) return;
+            const audioTracks = localStream.getAudioTracks();
+            if (audioTracks.length > 0) {
+                isMuted = !isMuted;
+                audioTracks[0].enabled = !isMuted;
+                updateVideoControlsUI();
+                appendSystemMessage(isMuted ? 'マイクをミュートしました' : 'ミュートを解除しました');
+            }
+        }
+
+        function toggleCamera() {
+            if (!localStream || isAudioOnlyActive) return;
+            const videoTracks = localStream.getVideoTracks();
+            if (videoTracks.length > 0) {
+                isCamOff = !isCamOff;
+                videoTracks[0].enabled = !isCamOff;
+                updateVideoControlsUI();
+                appendSystemMessage(isCamOff ? 'カメラをOFFにしました' : 'カメラをONに戻しました');
+            }
+        }
+
+        async function switchCamera() {
+            if (isAudioOnlyActive || isScreenSharing) return;
+            useFacingMode = (useFacingMode === 'user') ? 'environment' : 'user';
+            const localVideoEl = document.getElementById('local-video');
+            if (useFacingMode === 'environment') {
+                localVideoEl.classList.remove('transform', '-scale-x-100');
+                document.getElementById('local-video-label').innerText = 'あなた (外側カメラ)';
+            } else {
+                localVideoEl.classList.add('transform', '-scale-x-100');
+                document.getElementById('local-video-label').innerText = 'あなた (内側カメラ)';
+            }
+
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+            }
+
+            try {
+                localStream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: useFacingMode },
+                    audio: !isMuted
+                });
+                localVideoEl.srcObject = localStream;
+
+                if (activeCall && activeCall.peerConnection) {
+                    const videoSender = activeCall.peerConnection.getSenders().find(s => s.track && s.track.kind === 'video');
+                    if (videoSender) {
+                        videoSender.replaceTrack(localStream.getVideoTracks()[0]);
+                    }
+                }
+                appendSystemMessage(useFacingMode === 'environment' ? '外側カメラに切り替えました' : '内側カメラに切り替えました');
+            } catch (err) {
+                console.error(err);
+                alert('カメラの切り替えに失敗しました。');
+            }
+        }
+
+        function updateVideoControlsUI() {
+            const btnMute = document.getElementById('btn-mute');
+            if (isMuted) {
+                btnMute.className = "bg-red-600 hover:bg-red-500 text-white px-3 py-2 rounded-xl text-xs font-bold border border-red-500 transition flex items-center space-x-1.5 shadow";
+                btnMute.innerHTML = '<i class="fa-solid fa-microphone-slash"></i><span>ミュート中</span>';
+            } else {
+                btnMute.className = "bg-slate-800 hover:bg-slate-700 text-white px-3 py-2 rounded-xl text-xs font-bold border border-slate-600 transition flex items-center space-x-1.5 shadow";
+                btnMute.innerHTML = '<i class="fa-solid fa-microphone"></i><span>ミュート</span>';
+            }
+
+            const btnCam = document.getElementById('btn-cam');
+            if (isCamOff) {
+                btnCam.className = "bg-red-600 hover:bg-red-500 text-white px-3 py-2 rounded-xl text-xs font-bold border border-red-500 transition flex items-center space-x-1.5 shadow";
+                btnCam.innerHTML = '<i class="fa-solid fa-video"></i><span>カメラON</span>';
+            } else {
+                btnCam.className = "bg-slate-800 hover:bg-slate-700 text-white px-3 py-2 rounded-xl text-xs font-bold border border-slate-600 transition flex items-center space-x-1.5 shadow";
+                btnCam.innerHTML = '<i class="fa-solid fa-video-slash"></i><span>カメラOFF</span>';
+            }
+        }
+
+        function startCall(targetPeerId) {
+            if (!localStream || !peer) return;
+            const call = peer.call(targetPeerId, localStream);
+            if (call) {
+                activeCall = call;
+                call.on('stream', (remoteStream) => {
+                    const remoteVideoEl = document.getElementById('remote-video');
+                    remoteVideoEl.srcObject = remoteStream;
+                    document.getElementById('remote-video-label').innerText = '相手の映像 (接続中)';
+                });
+                call.on('close', () => {
+                    document.getElementById('remote-video').srcObject = null;
+                    document.getElementById('remote-video-label').innerText = '相手の映像 (切断)';
+                });
+            }
+        }
+
+        function handleIncomingCall(call) {
+            if (!localStream) {
+                navigator.mediaDevices.getUserMedia({ video: { facingMode: useFacingMode }, audio: true })
+                    .then((stream) => {
+                        localStream = stream;
+                        document.getElementById('local-video').parentElement.classList.remove('hidden');
+                        document.getElementById('local-video').srcObject = localStream;
+                        document.getElementById('video-container').classList.remove('hidden');
+                        isVideoActive = true;
+                        isMuted = false;
+                        isCamOff = false;
+                        updateVideoControlsUI();
+
+                        const btnVideo = document.getElementById('btn-video-call');
+                        btnVideo.className = "bg-red-600 hover:bg-red-500 text-white border border-red-500 px-3 py-2 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 shadow";
+                        btnVideo.innerHTML = '<i class="fa-solid fa-video-slash"></i><span class="hidden sm:inline">通話終了</span>';
+
+                        call.answer(localStream);
+                        setupCallEvents(call);
+                    })
+                    .catch(err => {
+                        console.error(err);
+                        call.answer();
+                        setupCallEvents(call);
+                    });
+            } else {
+                call.answer(localStream);
+                setupCallEvents(call);
+                document.getElementById('video-container').classList.remove('hidden');
+            }
+        }
+
+        function setupCallEvents(call) {
+            activeCall = call;
+            call.on('stream', (remoteStream) => {
+                const remoteVideoEl = document.getElementById('remote-video');
+                remoteVideoEl.srcObject = remoteStream;
+                document.getElementById('remote-video-label').innerText = '相手の映像 (接続中)';
+                appendSystemMessage('相手からの通話音声・映像を受信しました');
+            });
+            call.on('close', () => {
+                document.getElementById('remote-video').srcObject = null;
+                document.getElementById('remote-video-label').innerText = '相手の映像 (切断)';
+            });
+        }
+
+        function stopAllCalls() {
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+                localStream = null;
+            }
+            if (activeCall) {
+                activeCall.close();
+                activeCall = null;
+            }
+
+            const localVideoEl = document.getElementById('local-video');
+            const remoteVideoEl = document.getElementById('remote-video');
+            if (localVideoEl) localVideoEl.srcObject = null;
+            if (remoteVideoEl) remoteVideoEl.srcObject = null;
+
+            document.getElementById('video-container').classList.add('hidden');
+            
+            const btnVideo = document.getElementById('btn-video-call');
+            btnVideo.className = "bg-slate-800 hover:bg-slate-700 text-indigo-300 border border-slate-600 px-3 py-2 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 shadow";
+            btnVideo.innerHTML = '<i class="fa-solid fa-video"></i><span class="hidden sm:inline">テレビ通話</span>';
+
+            const btnAudio = document.getElementById('btn-audio-call');
+            btnAudio.className = "bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-slate-600 px-3 py-2 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 shadow";
+            btnAudio.innerHTML = '<i class="fa-solid fa-phone"></i><span class="hidden sm:inline">音声通話</span>';
+
+            isVideoActive = false;
+            isAudioOnlyActive = false;
+            isScreenSharing = false;
+            isMuted = false;
+            isCamOff = false;
+            appendSystemMessage('通話を終了しました');
+        }
+        // ----------------------------------------
+
+        function handleDataPacket(peerId, packet, modeType) {
+            if (packet.type === 'peer_list') {
+                connectToPeers(packet.peers);
+                return;
+            }
+            if (packet.type === 'request_peer_list') {
+                broadcastPeerList();
+                return;
+            }
+            if (packet.type === 'read_receipt') {
+                markAllMyMessagesAsRead();
+                if (modeType === 'group') {
+                    forwardToGroupOthers(peerId, packet);
+                }
+                return;
+            }
+
+            if (!incomingBuffers[peerId]) {
+                incomingBuffers[peerId] = {};
+            }
+
+            if (packet.type === 'chat') {
+                appendMessage(packet.senderName, packet.senderAvatar, packet.text, false, packet.timestamp, null, packet.isSticker, packet.isVideo, packet.mediaData, packet.isZip, packet.zipName);
+                sendPayloadReliably({ type: 'read_receipt', reader: myName });
+
+                if (modeType === 'group') {
+                    forwardToGroupOthers(peerId, packet);
+                }
+            } else if (packet.type === 'chunk_start') {
+                incomingBuffers[peerId][packet.fileId] = {
+                    senderName: packet.senderName,
+                    senderAvatar: packet.senderAvatar,
+                    timestamp: packet.timestamp,
+                    totalChunks: packet.totalChunks,
+                    receivedChunks: 0,
+                    chunks: new Array(packet.totalChunks),
+                    isVideo: packet.isVideo,
+                    isZip: packet.isZip,
+                    zipName: packet.zipName
+                };
+                sendPayloadReliably({ type: 'read_receipt', reader: myName });
+                if (modeType === 'group') {
+                    forwardToGroupOthers(peerId, packet);
+                }
+            } else if (packet.type === 'chunk_data') {
+                const fileBuf = incomingBuffers[peerId][packet.fileId];
+                if (fileBuf && !fileBuf.chunks[packet.chunkIndex]) {
+                    fileBuf.chunks[packet.chunkIndex] = packet.data;
+                    fileBuf.receivedChunks++;
+
+                    if (fileBuf.receivedChunks === fileBuf.totalChunks) {
+                        const fullMediaBase64 = fileBuf.chunks.join('');
+                        appendMessage(fileBuf.senderName, fileBuf.senderAvatar, '', false, fileBuf.timestamp, fullMediaBase64, false, fileBuf.isVideo, null, fileBuf.isZip, fileBuf.zipName);
+                        delete incomingBuffers[peerId][packet.fileId];
+                    }
+                }
+                if (modeType === 'group') {
+                    forwardToGroupOthers(peerId, packet);
+                }
+            }
+        }
+
+        let relayedPackets = new Set();
+        function forwardToGroupOthers(excludePeerId, packet) {
+            const packetKey = (packet.senderName || '') + (packet.text || packet.fileId || packet.type) + (packet.timestamp || '');
+            if (packet.type === 'read_receipt') {
+                // pass
+            } else {
+                if (relayedPackets.has(packetKey)) return;
+                relayedPackets.add(packetKey);
+                if (relayedPackets.size > 200) relayedPackets.clear();
+            }
+
+            Object.keys(connections).forEach(targetId => {
+                if (targetId !== excludePeerId) {
+                    const conn = connections[targetId];
+                    if (conn && conn.open) {
+                        conn.send(packet);
+                    }
+                }
+            });
+        }
+
+        function updatePeerCount() {
+            const count = Object.keys(connections).filter(id => connections[id].open).length + 1;
+            document.getElementById('peer-count').innerText = `参加者: ${Math.min(count, 40)}人`;
+            document.getElementById('chat-room-subtitle').innerText = `接続中 (${Math.min(count, 40)}人と同期中)`;
+        }
+
+        function sendPayloadReliably(payloadObj) {
+            Object.keys(connections).forEach(peerId => {
+                const conn = connections[peerId];
+                if (conn && conn.open) {
+                    conn.send(payloadObj);
+                }
+            });
+        }
+
+        function sendMessage() {
+            const input = document.getElementById('message-input');
+            const text = input.value.trim();
+            if (!text) return;
+
+            const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            appendMessage(myName, myAvatar, text, true, timestamp, null, false, false, null, false, null);
+            
+            const packetKey = myName + text + timestamp;
+            relayedPackets.add(packetKey);
+
+            sendPayloadReliably({
+                type: 'chat',
+                senderName: myName,
+                senderAvatar: myAvatar,
+                text: text,
+                timestamp: timestamp,
+                isSticker: false,
+                isVideo: false,
+                isZip: false
+            });
+
+            input.value = '';
+        }
+
+        function sendSticker(stickerText) {
+            toggleStickerPanel();
+            const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            appendMessage(myName, myAvatar, stickerText, true, timestamp, null, true, false, null, false, null);
+
+            const packetKey = myName + stickerText + timestamp;
+            relayedPackets.add(packetKey);
+
+            sendPayloadReliably({
+                type: 'chat',
+                senderName: myName,
+                senderAvatar: myAvatar,
+                text: stickerText,
+                timestamp: timestamp,
+                isSticker: true,
+                isVideo: false,
+                isZip: false
+            });
+        }
+
+        async function sendMediaFiles(event) {
+            const files = event.target.files;
+            if (!files || files.length === 0) return;
+
+            // 350MB制限チェック
+            let totalSize = 0;
+            for (let i = 0; i < files.length; i++) {
+                totalSize += files[i].size;
+            }
+            if (totalSize > 350 * 1024 * 1024) {
+                alert('ファイルサイズの合計が350MBを超えています。350MB以下のファイルを選択してください。');
+                event.target.value = '';
+                return;
+            }
+
+            try {
+                const zip = new JSZip();
+                const zipName = 'media_bundle_350mb_' + Math.floor(Date.now() / 1000) + '.zip';
+
+                for (let i = 0; i < files.length; i++) {
+                    const file = files[i];
+                    zip.file(file.name, file);
+                }
+
+                // 350MBの大容量に対応するためストリーム・圧縮オプションを最適化
+                const zipBlob = await zip.generateAsync({ type: 'base64', compression: 'DEFLATE', compressionOptions: { level: 3 } });
+                const zipBase64 = 'data:application/zip;base64,' + zipBlob;
+                const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+                appendMessage(myName, myAvatar, '', true, timestamp, zipBase64, false, false, null, true, zipName);
+                chatZipFiles.push({ name: zipName, data: zipBase64 });
+
+                const fileId = 'zip_' + Math.random().toString(36).substring(2, 9);
+                relayedPackets.add(myName + fileId + timestamp);
+
+                const CHUNK_SIZE = 8 * 1024; // 350MBの安定転送用ミニチャンク
+                const totalChunks = Math.ceil(zipBase64.length / CHUNK_SIZE);
+
+                sendPayloadReliably({
+                    type: 'chunk_start',
+                    fileId: fileId,
+                    senderName: myName,
+                    senderAvatar: myAvatar,
+                    timestamp: timestamp,
+                    totalChunks: totalChunks,
+                    isVideo: false,
+                    isZip: true,
+                    zipName: zipName
+                });
+
+                let currentChunk = 0;
+                function sendNextChunk() {
+                    if (currentChunk < totalChunks) {
+                        const start = currentChunk * CHUNK_SIZE;
+                        const chunkData = zipBase64.substring(start, start + CHUNK_SIZE);
+
+                        sendPayloadReliably({
+                            type: 'chunk_data',
+                            fileId: fileId,
+                            chunkIndex: currentChunk,
+                            data: chunkData
+                        });
+
+                        currentChunk++;
+                        setTimeout(sendNextChunk, 40);
+                    }
+                }
+                sendNextChunk();
+            } catch (err) {
+                console.error(err);
+                alert('350MBまでのファイルZIP圧縮・送信に失敗しました。');
+            }
+            event.target.value = '';
+        }
+
+        async function downloadAllZips() {
+            if (chatZipFiles.length === 0) {
+                alert('ダウンロードできるZIPファイルはありません。');
+                return;
+            }
+            try {
+                const masterZip = new JSZip();
+                chatZipFiles.forEach((zf, idx) => {
+                    const base64Content = zf.data.split(',')[1];
+                    masterZip.file(zf.name || `bundle_${idx}.zip`, base64Content, { base64: true });
+                });
+
+                const content = await masterZip.generateAsync({ type: 'blob' });
+                const url = URL.createObjectURL(content);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'all_chat_bundles_350mb.zip';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            } catch (err) {
+                console.error(err);
+                alert('一括ZIPダウンロードに失敗しました。');
+            }
+        }
+
+        function handleKeyPress(e) {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        }
+
+        function appendMessage(sender, senderAvatar, text, isMe, timestamp, media = null, isSticker = false, isVideo = false, mediaData = null, isZip = false, zipName = null) {
+            const container = document.getElementById('messages-container');
+            const messageRow = document.createElement('div');
+            messageRow.className = `flex items-end space-x-2 mb-3 ${isMe ? 'justify-end' : 'justify-start'} chat-message-row`;
+
+            let avatarHtml = '';
+            if (senderAvatar) {
+                avatarHtml = `<div class="w-8 h-8 rounded-full overflow-hidden flex-shrink-0 shadow border border-indigo-500"><img src="${senderAvatar}" class="w-full h-full object-cover"></div>`;
+            } else {
+                const initial = sender ? sender.charAt(0) : 'U';
+                avatarHtml = `<div class="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold text-xs flex-shrink-0 shadow">${initial}</div>`;
+            }
+
+            let contentHtml = '';
+            if (media) {
+                if (isZip) {
+                    if (media && !chatZipFiles.some(z => z.data === media)) {
+                        chatZipFiles.push({ name: zipName || 'bundle.zip', data: media });
+                    }
+                    contentHtml += `
+                        <div class="bg-slate-900 border border-slate-700 p-3 rounded-xl flex items-center space-x-3 mb-1">
+                            <i class="fa-solid fa-file-zipper text-amber-400 text-2xl"></i>
+                            <div>
+                                <p class="text-xs font-bold text-white">${escapeHtml(zipName || 'bundle.zip')}</p>
+                                <a href="${media}" download="${zipName || 'bundle.zip'}" class="text-[10px] text-indigo-400 hover:underline">個別にダウンロード</a>
+                            </div>
+                        </div>
+                    `;
+                } else if (isVideo) {
+                    contentHtml += `<video src="${media}" controls class="max-w-xs rounded-xl mb-1 shadow border border-slate-700"></video>`;
+                } else {
+                    contentHtml += `<img src="${media}" class="max-w-xs rounded-xl mb-1 shadow border border-slate-700">`;
+                }
+            }
+            if (text) {
+                if (isSticker) {
+                    contentHtml += `<div class="text-sm font-bold py-1.5 px-3 bg-indigo-950 text-indigo-200 border border-indigo-700/50 rounded-xl shadow-inner">${escapeHtml(text)}</div>`;
+                } else {
+                    contentHtml += `<p class="text-sm text-slate-100">${escapeHtml(text)}</p>`;
+                }
+            }
+
+            if (isMe) {
+                messageRow.innerHTML = `
+                    <div class="flex items-end space-x-1 max-w-xs md:max-w-md">
+                        <div class="flex flex-col items-end self-end mb-0.5">
+                            <span class="text-[10px] text-emerald-400 font-bold read-status hidden">既読</span>
+                            <span class="text-[10px] text-slate-400">${timestamp}</span>
+                        </div>
+                        <div class="bg-indigo-600 text-white rounded-2xl px-4 py-2.5 shadow-md rounded-br-none">
+                            ${contentHtml}
+                        </div>
+                    </div>
+                    ${avatarHtml}
+                `;
+            } else {
+                messageRow.innerHTML = `
+                    ${avatarHtml}
+                    <div class="flex flex-col">
+                        <span class="text-xs text-slate-400 ml-1 mb-1">${escapeHtml(sender)}</span>
+                        <div class="flex items-end space-x-1 max-w-xs md:max-w-md">
+                            <div class="bg-slate-800 border border-slate-700 text-slate-100 rounded-2xl px-4 py-2.5 shadow-md rounded-bl-none">
+                                ${contentHtml}
+                            </div>
+                            <span class="text-[10px] text-slate-400 self-end mb-1">${timestamp}</span>
+                        </div>
+                    </div>
+                `;
+            }
+
+            container.appendChild(messageRow);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function markAllMyMessagesAsRead() {
+            const rows = document.querySelectorAll('.chat-message-row');
+            rows.forEach(row => {
+                const readSpan = row.querySelector('.read-status');
+                if (readSpan) {
+                    readSpan.classList.remove('hidden');
+                }
+            });
+        }
+
+        function appendSystemMessage(text) {
+            const container = document.getElementById('messages-container');
+            const div = document.createElement('div');
+            div.className = 'text-center my-2';
+            div.innerHTML = `<span class="bg-slate-800 border border-slate-700 text-slate-400 text-xs px-3 py-1 rounded-full">${escapeHtml(text)}</span>`;
+            container.appendChild(div);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function clearMessages() {
+            document.getElementById('messages-container').innerHTML = ``;
+            chatZipFiles = [];
+        }
+
+        function showRoomInfo() {
+            if (currentRoomId) {
+                alert(`Nexus Chat セッション情報\nコード: ${currentRoomId}\nモード: ${currentMode === 'private' ? 'ダイレクト(1:1)' : 'スクール空間 (最大40人)'}`);
+            } else {
+                alert('アクティブなセッションはありません。');
+            }
+        }
+
+        function escapeHtml(str) {
+            return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+    </script>
+</body>
+</html>
